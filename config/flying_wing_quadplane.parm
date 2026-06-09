@@ -1,0 +1,83 @@
+# ============================================================
+#  flying_wing_quadplane.parm — ArduPlane QuadPlane (Quad-X + pusher)
+#  Load:  sim_vehicle.py -v ArduPlane -f gazebo-zephyr --model JSON \
+#               --add-param-file=flying_wing_quadplane.parm --map --console
+#  NOTE: physics is provided by Gazebo. These params configure the
+#  FIRMWARE only (frame, outputs, gains, transition, airspeed).
+# ============================================================
+
+# --- VTOL frame ---
+Q_ENABLE         1
+Q_FRAME_CLASS    1        # 1 = Quad
+Q_FRAME_TYPE     1        # 1 = X
+Q_M_PWM_MIN      1100
+Q_M_PWM_MAX      1900
+Q_M_THST_HOVER   0.63     # from thrust sizing (T/W 2.5 -> hover ~63%); EKF refines in flight
+Q_M_SPIN_ARM     0.10
+Q_M_SPIN_MIN     0.15
+
+# --- Servo output mapping (MUST match model.sdf control channels) ---
+SERVO1_FUNCTION  77       # Elevon Left   (ch0)
+SERVO2_FUNCTION  78       # Elevon Right  (ch1)
+SERVO3_FUNCTION  70       # Throttle / rear pusher (ch2)
+SERVO5_FUNCTION  33       # VTOL Motor 1  front-right CCW (ch4)
+SERVO6_FUNCTION  34       # VTOL Motor 2  rear-left  CCW (ch5)
+SERVO7_FUNCTION  35       # VTOL Motor 3  front-left CW  (ch6)
+SERVO8_FUNCTION  36       # VTOL Motor 4  rear-right CW  (ch7)
+SERVO1_MIN 1100
+SERVO1_MAX 1900
+SERVO1_TRIM 1500
+SERVO2_MIN 1100
+SERVO2_MAX 1900
+SERVO2_TRIM 1500
+SERVO3_MIN 1100
+SERVO3_MAX 1900
+SERVO3_TRIM 1100
+SERVO5_MIN 1100
+SERVO5_MAX 1900
+SERVO6_MIN 1100
+SERVO6_MAX 1900
+SERVO7_MIN 1100
+SERVO7_MAX 1900
+SERVO8_MIN 1100
+SERVO8_MAX 1900
+
+# --- Airspeed / cruise target (22 m/s) ---
+ARSPD_USE        1
+TRIM_ARSPD_CM    2200     # 22.0 m/s
+ARSPD_FBW_MIN    16
+ARSPD_FBW_MAX    30
+SCALING_SPEED    20
+
+# --- Transition tuning ---
+Q_ASSIST_SPEED   14       # below this, lift motors assist the wing
+Q_ASSIST_ANGLE   30
+Q_TRANSITION_MS  5000
+Q_RTL_MODE       1
+
+# --- VTOL rate gains: conservative starting point, then run Q_AUTOTUNE ---
+Q_A_RAT_RLL_P    0.12
+Q_A_RAT_RLL_I    0.10
+Q_A_RAT_RLL_D    0.0040
+Q_A_RAT_PIT_P    0.12
+Q_A_RAT_PIT_I    0.10
+Q_A_RAT_PIT_D    0.0040
+Q_A_RAT_YAW_P    0.30
+Q_A_RAT_YAW_I    0.020
+
+# --- Fixed-wing rate gains: starting point, then run AUTOTUNE in FBWA ---
+RLL_RATE_P       0.20
+RLL_RATE_I       0.10
+RLL_RATE_D       0.0050
+PTCH_RATE_P      0.20
+PTCH_RATE_I      0.15
+PTCH_RATE_D      0.0050
+
+# --- TECS (height/speed) seeds ---
+TECS_CLMB_MAX    5.0
+TECS_SINK_MIN    2.0
+TECS_SINK_MAX    5.0
+
+# --- EKF ---
+AHRS_EKF_TYPE    3
+EK3_ENABLE       1

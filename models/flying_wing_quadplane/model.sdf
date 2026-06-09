@@ -1,0 +1,522 @@
+<?xml version="1.0" ?>
+<!--
+  flying_wing_quadplane  —  ArduPilot SITL / Gazebo Harmonic model
+  ================================================================
+  Derived from XFLR5 file: iteration3current2realnewwinglet
+  AUW 10.8 kg | span 2.375 m | S 0.859 m^2 | MAC 0.447 m | AR 6.57
+
+  Frame: FLU  (X = forward/nose, Y = left, Z = up), origin at CG.
+  Lift layout: Quad-X (4 rotors) + centerline rear pusher (non-tilt quadplane).
+
+  Built by composing the two OFFICIAL ardupilot_gazebo reference models:
+    - rotor thrust  -> iris_with_ardupilot  (LiftDrag-on-spinning-rotor)
+    - wing/elevons  -> zephyr_with_ardupilot (LiftDrag lifting surfaces)
+  Vectors transformed from Zephyr (x=span) to this FLU frame via (a,b,c)->(-b,a,c).
+
+  >>> CALIBRATION POINTS (verified on first `gz sim` run, see README) <<<
+    [C1] wing <a0> sign      — if wing lifts/ trims wrong, flip sign.
+    [C2] rotor <area> 0.0068 — sized for T/W 2.5 (hover ~63%); rescale to taste.
+    [C3] velocity <cmd_max>  — raise if rotors don't reach target RPM.
+-->
+<sdf version="1.9">
+  <model name="flying_wing_quadplane">
+    <pose>0 0 0 0 0 0</pose>
+
+    <!-- ============================ BODY ============================ -->
+    <link name="base_link">
+      <inertial>
+        <!-- Full vehicle mass/inertia about CG (from XFLR5 point masses + 4.5 kg wing). -->
+        <pose>0 0 0 0 0 0</pose>
+        <mass>10.26</mass>
+        <inertia>
+          <ixx>1.9397</ixx>   <!-- roll  -->
+          <iyy>0.4599</iyy>   <!-- pitch -->
+          <izz>2.3685</izz>   <!-- yaw   -->
+          <ixy>0</ixy>
+          <ixz>0.0355</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+
+      <!-- visual: wing planform (box stand-in; swap for wing.dae mesh later) -->
+      <visual name="wing_visual">
+        <pose>-0.05 0 0 0 0 0</pose>
+        <geometry><box><size>0.45 2.30 0.05</size></box></geometry>
+        <material>
+          <ambient>0.73 0.67 0.62 1</ambient>
+          <diffuse>0.73 0.67 0.62 1</diffuse>
+        </material>
+      </visual>
+      <!-- visual: centre body / nose -->
+      <visual name="body_visual">
+        <pose>0.10 0 0.01 0 0 0</pose>
+        <geometry><box><size>0.85 0.20 0.12</size></box></geometry>
+        <material>
+          <ambient>0.2 0.2 0.22 1</ambient>
+          <diffuse>0.2 0.2 0.22 1</diffuse>
+        </material>
+      </visual>
+      <!-- visual: winglets -->
+      <visual name="winglet_left_visual">
+        <pose>-0.30 1.18 0.12 0 0 0</pose>
+        <geometry><box><size>0.16 0.02 0.20</size></box></geometry>
+        <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.3 0.3 0.32 1</diffuse></material>
+      </visual>
+      <visual name="winglet_right_visual">
+        <pose>-0.30 -1.18 0.12 0 0 0</pose>
+        <geometry><box><size>0.16 0.02 0.20</size></box></geometry>
+        <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.3 0.3 0.32 1</diffuse></material>
+      </visual>
+
+      <!-- collision: wing slab + belly skids so it rests on the runway -->
+      <collision name="wing_collision">
+        <pose>-0.05 0 0 0 0 0</pose>
+        <geometry><box><size>0.45 2.30 0.05</size></box></geometry>
+      </collision>
+      <collision name="skid_front">
+        <pose>0.20 0 -0.10 0 0 0</pose>
+        <geometry><box><size>0.06 0.30 0.16</size></box></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+      </collision>
+      <collision name="skid_rear">
+        <pose>-0.30 0 -0.10 0 0 0</pose>
+        <geometry><box><size>0.06 0.30 0.16</size></box></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+      </collision>
+    </link>
+
+    <!-- ============================ IMU ============================ -->
+    <link name="imu_link">
+      <inertial>
+        <mass>0.05</mass>
+        <inertia><ixx>1e-5</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-5</iyy><iyz>0</iyz><izz>1e-5</izz></inertia>
+      </inertial>
+      <sensor name="imu_sensor" type="imu">
+        <gz_frame_id>imu_link</gz_frame_id>
+        <pose degrees="true">0 0 0 180 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>1000.0</update_rate>
+      </sensor>
+    </link>
+    <joint name="imu_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>imu_link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>0</lower><upper>0</upper><effort>0</effort><velocity>0</velocity></limit>
+        <dynamics><damping>1.0</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ===================== LIFT ROTORS (Quad-X) ===================== -->
+    <!-- Motor map (ArduPilot QuadPlane): rotor_0 M1 FR/CCW, rotor_1 M2 RL/CCW,
+         rotor_2 M3 FL/CW, rotor_3 M4 RR/CW  (identical ordering to iris). -->
+
+    <!-- rotor_0 : FRONT-RIGHT, CCW -->
+    <link name="rotor_0">
+      <pose>0.390 -0.400 0.10 0 0 0</pose>
+      <inertial><mass>0.08</mass>
+        <inertia><ixx>4.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>4.0e-4</iyy><iyz>0</iyz><izz>8.0e-4</izz></inertia>
+      </inertial>
+      <visual name="visual"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry>
+        <material><ambient>0 0 1 1</ambient><diffuse>0 0 1 1</diffuse></material></visual>
+      <collision name="collision"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry></collision>
+    </link>
+    <joint name="rotor_0_joint" type="revolute">
+      <parent>base_link</parent><child>rotor_0</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit><dynamics><damping>0.004</damping></dynamics></axis>
+    </joint>
+
+    <!-- rotor_1 : REAR-LEFT, CCW -->
+    <link name="rotor_1">
+      <pose>-0.410 0.400 0.10 0 0 0</pose>
+      <inertial><mass>0.08</mass>
+        <inertia><ixx>4.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>4.0e-4</iyy><iyz>0</iyz><izz>8.0e-4</izz></inertia>
+      </inertial>
+      <visual name="visual"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry>
+        <material><ambient>0 0 1 1</ambient><diffuse>0 0 1 1</diffuse></material></visual>
+      <collision name="collision"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry></collision>
+    </link>
+    <joint name="rotor_1_joint" type="revolute">
+      <parent>base_link</parent><child>rotor_1</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit><dynamics><damping>0.004</damping></dynamics></axis>
+    </joint>
+
+    <!-- rotor_2 : FRONT-LEFT, CW -->
+    <link name="rotor_2">
+      <pose>0.390 0.400 0.10 0 0 0</pose>
+      <inertial><mass>0.08</mass>
+        <inertia><ixx>4.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>4.0e-4</iyy><iyz>0</iyz><izz>8.0e-4</izz></inertia>
+      </inertial>
+      <visual name="visual"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry>
+        <material><ambient>0 1 0 1</ambient><diffuse>0 1 0 1</diffuse></material></visual>
+      <collision name="collision"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry></collision>
+    </link>
+    <joint name="rotor_2_joint" type="revolute">
+      <parent>base_link</parent><child>rotor_2</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit><dynamics><damping>0.004</damping></dynamics></axis>
+    </joint>
+
+    <!-- rotor_3 : REAR-RIGHT, CW -->
+    <link name="rotor_3">
+      <pose>-0.410 -0.400 0.10 0 0 0</pose>
+      <inertial><mass>0.08</mass>
+        <inertia><ixx>4.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>4.0e-4</iyy><iyz>0</iyz><izz>8.0e-4</izz></inertia>
+      </inertial>
+      <visual name="visual"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry>
+        <material><ambient>0 1 0 1</ambient><diffuse>0 1 0 1</diffuse></material></visual>
+      <collision name="collision"><geometry><cylinder><radius>0.203</radius><length>0.012</length></cylinder></geometry></collision>
+    </link>
+    <joint name="rotor_3_joint" type="revolute">
+      <parent>base_link</parent><child>rotor_3</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit><dynamics><damping>0.004</damping></dynamics></axis>
+    </joint>
+
+    <!-- ===================== REAR PUSHER (cruise) ===================== -->
+    <link name="pusher_prop">
+      <pose>-0.42 0 0.03 0 0 0</pose>
+      <inertial><mass>0.10</mass>
+        <inertia><ixx>3.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>3.0e-4</iyy><iyz>0</iyz><izz>6.0e-4</izz></inertia>
+      </inertial>
+      <visual name="visual"><pose>0 0 0 0 1.5708 0</pose>
+        <geometry><cylinder><radius>0.165</radius><length>0.012</length></cylinder></geometry>
+        <material><ambient>0.9 0.4 0 1</ambient><diffuse>0.9 0.4 0 1</diffuse></material></visual>
+    </link>
+    <joint name="pusher_joint" type="revolute">
+      <parent>base_link</parent><child>pusher_prop</child>
+      <axis><xyz>1 0 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit><dynamics><damping>0.004</damping></dynamics></axis>
+    </joint>
+
+    <!-- ===================== ELEVONS (L / R) ===================== -->
+    <link name="flap_left">
+      <pose>-0.167 0.55 0.0 0 0 0</pose>
+      <inertial><mass>0.06</mass>
+        <inertia><ixx>1.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>2.0e-3</iyy><iyz>0</iyz><izz>2.0e-3</izz></inertia>
+      </inertial>
+      <visual name="visual"><geometry><box><size>0.12 0.55 0.02</size></box></geometry>
+        <material><ambient>0.55 0.5 0.46 1</ambient><diffuse>0.55 0.5 0.46 1</diffuse></material></visual>
+    </link>
+    <joint name="flap_left_joint" type="revolute">
+      <parent>base_link</parent><child>flap_left</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-0.524</lower><upper>0.524</upper></limit><dynamics><damping>0.1</damping></dynamics></axis>
+    </joint>
+
+    <link name="flap_right">
+      <pose>-0.167 -0.55 0.0 0 0 0</pose>
+      <inertial><mass>0.06</mass>
+        <inertia><ixx>1.0e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>2.0e-3</iyy><iyz>0</iyz><izz>2.0e-3</izz></inertia>
+      </inertial>
+      <visual name="visual"><geometry><box><size>0.12 0.55 0.02</size></box></geometry>
+        <material><ambient>0.55 0.5 0.46 1</ambient><diffuse>0.55 0.5 0.46 1</diffuse></material></visual>
+    </link>
+    <joint name="flap_right_joint" type="revolute">
+      <parent>base_link</parent><child>flap_right</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-0.524</lower><upper>0.524</upper></limit><dynamics><damping>0.1</damping></dynamics></axis>
+    </joint>
+
+    <!-- ===================================================================
+         AERODYNAMICS  (gz-sim LiftDrag system)
+         Wing coeffs from XFLR5: CLa 4.265/rad, a0(zero-lift) -0.045 rad,
+         cp at aero-centre (X=-0.014, 0.014 m aft of CG -> +3.1% MAC static margin)
+         =================================================================== -->
+
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher"></plugin>
+
+    <!-- LEFT wing half -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>-0.045</a0>            <!-- [C1] zero-lift AoA; flip sign if lift/trim is wrong -->
+      <cla>4.265</cla>
+      <cda>0.05</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.262</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <cp>-0.014 0.50 0.03</cp>
+      <area>0.43</area>
+      <air_density>1.225</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
+    <!-- RIGHT wing half -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>-0.045</a0>
+      <cla>4.265</cla>
+      <cda>0.05</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.262</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <cp>-0.014 -0.50 0.03</cp>
+      <area>0.43</area>
+      <air_density>1.225</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
+    <!-- LEFT elevon (control surface) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>4.0</cla>
+      <cda>0.06</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.35</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <cp>-0.30 0.55 0.0</cp>
+      <area>0.09</area>
+      <air_density>1.225</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+      <link_name>base_link</link_name>
+      <control_joint_name>flap_left_joint</control_joint_name>
+      <control_joint_rad_to_cl>-4.0</control_joint_rad_to_cl>
+    </plugin>
+
+    <!-- RIGHT elevon (control surface) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>4.0</cla>
+      <cda>0.06</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.35</alpha_stall>
+      <cla_stall>-3.85</cla_stall>
+      <cda_stall>-0.92</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <cp>-0.30 -0.55 0.0</cp>
+      <area>0.09</area>
+      <air_density>1.225</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+      <link_name>base_link</link_name>
+      <control_joint_name>flap_right_joint</control_joint_name>
+      <control_joint_rad_to_cl>-4.0</control_joint_rad_to_cl>
+    </plugin>
+
+    <!-- LEFT winglet (vertical -> yaw stability) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0><cla>3.8</cla><cda>0.06</cda><cma>0.0</cma>
+      <alpha_stall>0.30</alpha_stall><cla_stall>-3.85</cla_stall><cda_stall>-0.92</cda_stall><cma_stall>0.0</cma_stall>
+      <cp>-0.30 1.18 0.12</cp>
+      <area>0.045</area>
+      <air_density>1.225</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 1 0</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+    <!-- RIGHT winglet -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0><cla>3.8</cla><cda>0.06</cda><cma>0.0</cma>
+      <alpha_stall>0.30</alpha_stall><cla_stall>-3.85</cla_stall><cda_stall>-0.92</cda_stall><cma_stall>0.0</cma_stall>
+      <cp>-0.30 -1.18 0.12</cp>
+      <area>0.045</area>
+      <air_density>1.225</air_density>
+      <forward>1 0 0</forward>
+      <upward>0 -1 0</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
+    <!-- ===== ROTOR THRUST: 2 LiftDrag blades per rotor (iris pattern, scaled) =====
+         area 0.0068 + cp r=0.152 + cmd 524 rad/s  =>  ~66 N max/motor (T/W 2.5). [C2] -->
+
+    <!-- rotor_0 (CCW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>0.152 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_0</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>-0.152 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_0</link_name>
+    </plugin>
+
+    <!-- rotor_1 (CCW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>0.152 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_1</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>-0.152 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_1</link_name>
+    </plugin>
+
+    <!-- rotor_2 (CW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>0.152 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_2</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>-0.152 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_2</link_name>
+    </plugin>
+
+    <!-- rotor_3 (CW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>0.152 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_3</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0068</area><air_density>1.225</air_density>
+      <cp>-0.152 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_3</link_name>
+    </plugin>
+
+    <!-- ===== PUSHER THRUST: 2 LiftDrag blades, spins about +X, thrust +X ===== -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0024</area><air_density>1.225</air_density>
+      <cp>0 0 0.13</cp><forward>0 -1 0</forward><upward>1 0 0</upward>
+      <link_name>pusher_prop</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.25</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.0024</area><air_density>1.225</air_density>
+      <cp>0 0 -0.13</cp><forward>0 1 0</forward><upward>1 0 0</upward>
+      <link_name>pusher_prop</link_name>
+    </plugin>
+
+    <!-- ===== Apply-joint-force enablers (one per actuated joint) ===== -->
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>rotor_0_joint</joint_name></plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>rotor_1_joint</joint_name></plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>rotor_2_joint</joint_name></plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>rotor_3_joint</joint_name></plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>pusher_joint</joint_name></plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>flap_left_joint</joint_name></plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce"><joint_name>flap_right_joint</joint_name></plugin>
+
+    <!-- ======================= ArduPilot bridge ======================= -->
+    <plugin name="ArduPilotPlugin" filename="ArduPilotPlugin">
+      <fdm_addr>127.0.0.1</fdm_addr>
+      <fdm_port_in>9002</fdm_port_in>
+      <connectionTimeoutMaxCount>5</connectionTimeoutMaxCount>
+      <lock_step>1</lock_step>
+      <no_time_sync>1</no_time_sync>
+      <have_32_channels>0</have_32_channels>
+
+      <!-- This model is already X-forward, Z-up (like iris). -->
+      <modelXYZToAirplaneXForwardZDown degrees="true">0 0 0 180 0 0</modelXYZToAirplaneXForwardZDown>
+      <gazeboXYZToNED degrees="true">0 0 0 180 0 90</gazeboXYZToNED>
+
+      <imuName>flying_wing_quadplane::imu_link::imu_sensor</imuName>
+
+      <!-- ch0 = SERVO1 = Elevon Left  (func 77) -->
+      <control channel="0">
+        <jointName>flap_left_joint</jointName>
+        <useForce>1</useForce>
+        <type>POSITION</type>
+        <multiplier>-1.048</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>10.0</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>-2.5</cmd_min>
+      </control>
+
+      <!-- ch1 = SERVO2 = Elevon Right (func 78) -->
+      <control channel="1">
+        <jointName>flap_right_joint</jointName>
+        <useForce>1</useForce>
+        <type>POSITION</type>
+        <multiplier>-1.048</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>10.0</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>-2.5</cmd_min>
+      </control>
+
+      <!-- ch2 = SERVO3 = Throttle / rear pusher (func 70) -->
+      <control channel="2">
+        <jointName>pusher_joint</jointName>
+        <useForce>1</useForce>
+        <type>VELOCITY</type>
+        <multiplier>700</multiplier>
+        <offset>0</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>0.20</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>0.0</cmd_min>
+      </control>
+
+      <!-- ch4 = SERVO5 = VTOL Motor 1 = rotor_0 FRONT-RIGHT CCW (func 33) -->
+      <control channel="4">
+        <jointName>rotor_0_joint</jointName>
+        <useForce>1</useForce>
+        <type>VELOCITY</type>
+        <multiplier>524</multiplier>
+        <offset>0</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>0.20</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>-2.5</cmd_min>
+        <controlVelocitySlowdownSim>1</controlVelocitySlowdownSim>
+      </control>
+
+      <!-- ch5 = SERVO6 = VTOL Motor 2 = rotor_1 REAR-LEFT CCW (func 34) -->
+      <control channel="5">
+        <jointName>rotor_1_joint</jointName>
+        <useForce>1</useForce>
+        <type>VELOCITY</type>
+        <multiplier>524</multiplier>
+        <offset>0</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>0.20</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>-2.5</cmd_min>
+        <controlVelocitySlowdownSim>1</controlVelocitySlowdownSim>
+      </control>
+
+      <!-- ch6 = SERVO7 = VTOL Motor 3 = rotor_2 FRONT-LEFT CW (func 35) -->
+      <control channel="6">
+        <jointName>rotor_2_joint</jointName>
+        <useForce>1</useForce>
+        <type>VELOCITY</type>
+        <multiplier>-524</multiplier>
+        <offset>0</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>0.20</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>-2.5</cmd_min>
+        <controlVelocitySlowdownSim>1</controlVelocitySlowdownSim>
+      </control>
+
+      <!-- ch7 = SERVO8 = VTOL Motor 4 = rotor_3 REAR-RIGHT CW (func 36) -->
+      <control channel="7">
+        <jointName>rotor_3_joint</jointName>
+        <useForce>1</useForce>
+        <type>VELOCITY</type>
+        <multiplier>-524</multiplier>
+        <offset>0</offset>
+        <servo_min>1100</servo_min><servo_max>1900</servo_max>
+        <p_gain>0.20</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <i_max>0</i_max><i_min>0</i_min><cmd_max>2.5</cmd_max><cmd_min>-2.5</cmd_min>
+        <controlVelocitySlowdownSim>1</controlVelocitySlowdownSim>
+      </control>
+
+    </plugin>
+  </model>
+</sdf>
