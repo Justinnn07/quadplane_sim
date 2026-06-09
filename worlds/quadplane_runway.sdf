@@ -9,9 +9,9 @@
     </physics>
 
     <plugin filename="gz-sim-physics-system"          name="gz::sim::systems::Physics"></plugin>
-    <plugin filename="gz-sim-sensors-system"          name="gz::sim::systems::Sensors">
-      <render_engine>ogre2</render_engine>
-    </plugin>
+    <!-- gz-sim-sensors-system REMOVED: it starts a server-side ogre2/Metal render engine
+         (a frequent macOS crash source) and this model has NO camera/lidar sensors — only
+         an IMU, which is handled by gz-sim-imu-system below. Re-add it only if you add a camera. -->
     <plugin filename="gz-sim-user-commands-system"    name="gz::sim::systems::UserCommands"></plugin>
     <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"></plugin>
     <plugin filename="gz-sim-imu-system"              name="gz::sim::systems::Imu"></plugin>
