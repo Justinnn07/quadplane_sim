@@ -30,6 +30,12 @@ case "${VERSION_ID:-}" in
   *) warn "Targets Ubuntu 22.04/24.04 LTS. '${VERSION_ID:-?}' may work but is untested." ;;
 esac
 
+# Raise the open-file limit for this build session. Gazebo + SITL + a parallel
+# compile open many file descriptors; Ubuntu's default soft limit (1024) is too low.
+ulimit -n 65535 2>/dev/null \
+  || warn "Could not raise open-file limit (hard cap?). See SETUP_Ubuntu_LTS.md if you hit 'too many open files'."
+log "open-file limit (this session): soft=$(ulimit -Sn)  hard=$(ulimit -Hn)"
+
 # ---- 1. ArduPilot SITL + dev environment -----------------------------------
 if [ ! -d "$ARDUPILOT_DIR/.git" ]; then
   log "Cloning ArduPilot (with submodules)…"
@@ -38,6 +44,14 @@ else
   log "ArduPilot present — syncing submodules…"
   git -C "$ARDUPILOT_DIR" submodule update --init --recursive
 fi
+
+# Preempt the SLOW wxPython source build (MAVProxy depends on it). The prebuilt
+# system package installs in seconds; pip then sees wxPython satisfied and skips
+# compiling wxWidgets from source (which can take 30-60 min or segfault on 24.04).
+log "Installing prebuilt wxPython (python3-wxgtk4.0) to avoid a long source build…"
+sudo apt-get update
+sudo apt-get install -y python3-wxgtk4.0 \
+  || warn "python3-wxgtk4.0 unavailable — MAVProxy may fall back to building wxPython from source."
 
 log "Installing ArduPilot prerequisites (MAVProxy, toolchain, pymavlink)…"
 ( cd "$ARDUPILOT_DIR" && Tools/environment_install/install-prereqs-ubuntu.sh -y )
@@ -87,6 +101,7 @@ add_line "# --- ArduPilot + Gazebo (added by setup_ubuntu.sh) ---"
 add_line "export GZ_VERSION=$GZ_VER"
 add_line "export GZ_SIM_SYSTEM_PLUGIN_PATH=$PLUGIN_DIR/build:\${GZ_SIM_SYSTEM_PLUGIN_PATH}"
 add_line "export GZ_SIM_RESOURCE_PATH=$PLUGIN_DIR/models:$PLUGIN_DIR/worlds:$SIM_DIR/models:$SIM_DIR/worlds:\${GZ_SIM_RESOURCE_PATH}"
+add_line "ulimit -n 65535 2>/dev/null || true   # raise open-file limit for Gazebo/SITL"
 
 # ---- done ------------------------------------------------------------------
 log "SETUP COMPLETE."

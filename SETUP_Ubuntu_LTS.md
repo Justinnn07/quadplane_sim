@@ -128,7 +128,9 @@ Then follow the first-flight checklist in the project `README.md`. Speed it up w
 
 | Symptom | Fix |
 |---|---|
+| **wxPython compiles forever / segfaults** (during MAVProxy install) | Stop it, then `sudo apt install -y python3-wxgtk4.0` (prebuilt) and re-run — pip then skips the source build. In a venv: use the wheel index `pip install -U -f https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04 wxPython`, or recreate the venv with `--system-site-packages`. Don't need the GUI? Skip it and connect QGC/Mission Planner to TCP `127.0.0.1:5760`. |
 | `sim_vehicle.py: command not found` | `. ~/.profile` (it adds `ardupilot/Tools/autotest` to PATH) |
+| **"maximum number of open files reached" / `ulimit -n`** | Soft FD limit (default 1024) too low for Gazebo+SITL. `ulimit -n 65535` in that terminal, then re-run (the script + `~/.bashrc` now do this for you). If "operation not permitted", add `* soft nofile 65535` and `* hard nofile 65535` to `/etc/security/limits.conf` and re-login. |
 | `gz sim` opens but world is empty / model missing | `GZ_SIM_RESOURCE_PATH` not set in that terminal → `source ~/.bashrc` |
 | Vehicle loads but won't respond to SITL | frame must be `gazebo-...` **and** `--model JSON`; check SITL prints "Connected to Gazebo" |
 | `cmake` can't find `gz-sim8` | `export GZ_VERSION=harmonic` then re-run cmake; confirm `gz-harmonic` installed |
